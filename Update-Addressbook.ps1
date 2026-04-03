@@ -105,17 +105,26 @@ $updatedList = @()
 
 foreach ($row in $baseData) {
     $email = $row.メールアドレス
+
+    # 追加要件: @fmget.co.jp 以外のアドレス（社外アドレスなど）は処理対象外としてそのまま追加
+    if ($email -notmatch "@fmget.co.jp") {
+        $updatedList += $row
+        continue
+    }
+
     $existsInNew = $newMails -contains $email
     $existsInMail = $mailMails -contains $email
 
     if ($existsInNew -or $existsInMail) {
         $updatedList += $row
     } else {
-        if ($row.メールアドレス -match "@fmget.co.jp") {
-            if (-not $existsInNew) {
+        # どちらにも存在しない場合（無効になった社内アドレス）
+        # MLかどうかの判別は完全にはできないため、"ML" や "メーリング" が名前に含まれていれば削除済、それ以外は退職済とする
+        if ($row.氏名 -notmatch "\(退職済\)|\(削除済\)") {
+            if ($row.氏名 -match "ML|メーリング") {
+                $row.氏名 = $row.氏名 + "(削除済)"
+            } else {
                 $row.氏名 = $row.氏名 + "(退職済)"
-            } elseif (-not $existsInMail) {
-                $row.氏名 = $row.氏名 + "(削除)"
             }
         }
         $updatedList += $row
@@ -206,10 +215,18 @@ foreach ($mailRow in $mailList) {
     }
 }
 
-# 必要な列だけを抽出（列名は出力しない）
-$outputLines = $updatedList | ForEach-Object {
-    "$($_.'ＩＤ（システムＩＤ：自動発番）'),$($_.氏名),$($_.氏名ふりがな),$($_.メールアドレス)"
-}
+# 必要な列だけを持つオブジェクトに変換
+$outputData = $updatedList | Select-Object `
+    @{Name='Col1'; Expression={$_.'ＩＤ（システムＩＤ：自動発番）'}},
+    @{Name='Col2'; Expression={$_.氏名}},
+    @{Name='Col3'; Expression={$_.氏名ふりがな}},
+    @{Name='Col4'; Expression={$_.メールアドレス}}
+
+# ConvertTo-Csv で変換（PowerShell 7以降）
+# -NoTypeInformation: 型情報を出力しない
+# -UseQuotes AsNeeded: カンマを含むデータがある場合のみ " " で囲む（安全）
+# Select-Object -Skip 1: 1行目のヘッダー（Col1,Col2...）を取り除く
+$outputLines = $outputData | ConvertTo-Csv -NoTypeInformation -UseQuotes AsNeeded | Select-Object -Skip 1
 
 # 一時UTF-8ファイル（列なしCSV用）
 $tempFile = "$outputFile.tmp"
